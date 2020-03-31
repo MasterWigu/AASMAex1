@@ -1,4 +1,6 @@
 import sys
+from math import inf
+from itertools import combinations_with_replacement
 
 
 def getTaskUtility(tasks, number, memFactor):
@@ -13,15 +15,18 @@ def getTaskUtility(tasks, number, memFactor):
     for uPair in tasks[number][1]:
         ut += ((uPair[1]**memFactor) / summation) * uPair[0]
 
-    return ut
+    return round(ut, 4)
 
 
-def updateUtility(tasks, number, utility, cycle):
+def updateUtility(tasks, number, utility, cycle, memFactor):
+
+    # print("Task: T"+ str(number) + " Old value: " + str(getTaskUtility(tasks, number, memFactor)))
     if tasks[number][0]:
         tasks[number][1] = [(utility, cycle), ]
         tasks[number][0] = False
     else:
         tasks[number][1].append((utility, cycle))
+    # print("Task: T"+ str(number) + " New value: " + str(getTaskUtility(tasks, number, memFactor)))
 
 
 def createTask(tasks, number, specUtility):
@@ -56,26 +61,50 @@ class Agent:
                 self.memoryFactor = float(i.replace("memory-factor=", ""))
 
     def perceive(self, input):
-        # print("AAAAA   "+ input)
         if input.find("A") != -1:
-            ut = float(input.replace("A u=", ""))
-            self.gain += ut
-            updateUtility(self.tasks, self.lastDone, ut, self.currCycle)
+            if self.lastDone != -1:
+                ut = float(input.replace("A u=", ""))
+                self.gain += ut
+                updateUtility(self.tasks, self.lastDone, ut, self.currCycle, self.memoryFactor)
+                self.lastDone = -1
         else:
             lst = input.replace("T", "").split(" u=")  # lst=[taskNo, specUt]
             self.tasks[int(lst[0])] = [True, [(float(lst[1]), 0), ]]
 
     def decide_act(self):
-        act = max(self.tasks.keys(), key=(lambda k: getTaskUtility(self.tasks, k, self.memoryFactor)))
-        if act != self.lastTask:
-            self.prepLasting = self.restart
-        if act == self.lastTask or self.restart == 0:
-            if self.prepLasting > 0:
+        taskMax = max(self.tasks.keys(), key=(lambda k: getTaskUtility(self.tasks, k, self.memoryFactor)))
+        # print("tMax = " + str(taskMax) + " || lastTask = " + str(self.lastTask))
+        # case change:
+        utCh = getTaskUtility(self.tasks, taskMax, self.memoryFactor) * (self.cycle - self.currCycle - self.restart)
+        # case stay:
+        if self.lastTask != -1:
+            utSt = getTaskUtility(self.tasks, self.lastTask, self.memoryFactor) * (self.cycle - self.currCycle - self.prepLasting)
+        else:  # if none before
+            utSt = -inf
+
+        # print("utSt = " + str(utSt) + " || utCh = " + str(utCh))
+
+        if self.restart == 0:
+            self.lastDone = taskMax
+            self.lastTask = taskMax
+        elif utCh > utSt or ((utCh == utSt and min(taskMax, self.lastTask) == taskMax) and taskMax != self.lastTask):  # case change
+            # print("CHANGE / PREP")
+            self.lastTask = taskMax
+            self.prepLasting = self.restart - 1
+        else:  # case stay
+            if self.prepLasting > 0:  # still preparing
+                # print("STAY  / PREP")
                 self.prepLasting -= 1
-            if self.prepLasting == 0:
-                self.lastDone = act
-        self.lastTask = act
+            else:  # execute task
+                # print("STAY  / EXEC")
+                self.lastDone = self.lastTask
+
         self.currCycle += 1
+        # print("Chosen task: T" + str(self.lastTask))
+        # print(self.recharge())
+
+    def do_act(self):
+
 
     def recharge(self):
         out = self.name + "={"
@@ -86,6 +115,37 @@ class Agent:
                 out += "T"+str(k)+"=NA,"
         out = out[:-1]+"}"
         return out, self.gain
+
+
+def calculateGain(comb):
+
+
+
+
+
+def chooseTasks():
+    tempTasks = agents[agents.keys()[0]].tasks.keys()
+    combs = combinations_with_replacement(tempTasks, len(agents))
+    gain = -inf
+    tempGain = 0
+    finalComb = None
+    for comb in combs:
+
+        tempGain = calculateGain(comb)
+        if gain > tempGain:
+            finalComb = comb
+        elif gain == tempGain:
+            finalComb = chooseIndexBest(finalComb, comb)
+    return finalComb
+
+
+
+
+
+
+
+
+
 
 
 #####################
@@ -100,9 +160,11 @@ percUt = []
 
 for opt in line.split(' '):
     if opt.find("agents=") != -1:
-        aNames = opt.replace("agents={", "").replace("}", "").split(',')
+        aNames = opt.replace("agents={", "").replace("}", "").replace("agents=[", "").replace("]", "").split(',')
     if opt.find("decision=") != -1:
         decision = opt.replace("decision=", "")
+        if decision == "flexible":
+            exit(0)
 
 for name in aNames:
     agents[name] = Agent(line.split(' '), name)
@@ -128,10 +190,12 @@ for line in sys.stdin:
                 percUt = []
 
 
-rech = "state={"
+rech = ""
 gain = 0
 for agent in agents.keys():
     rech += agents[agent].recharge()[0] + ","
+    if len(agents.keys()) == 1:  # if only 1 agent, dont output agent name
+        rech = rech[3:-1]
     gain += agents[agent].recharge()[1]
-rech = rech[:-1]+"} gain=" + str(gain)
+rech = "state={" + rech[:-1]+"} gain=" + "{0:.2f}".format(gain)
 sys.stdout.write(rech+'\n')
